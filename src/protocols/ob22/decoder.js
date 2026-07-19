@@ -214,8 +214,10 @@ function parseFrame(frame) {
   if (!crcValid) {
     return { ...base, type: 'UNKNOWN', imei: null, normalized: null };
   }
-
+console.log("parseFrame", protocolNumber, content, base)
   switch (protocolNumber) {
+
+    
     case PROTOCOL_NUMBER.LOGIN: {
       const imei = bcdToImei(content.subarray(0, 8));
       return { ...base, type: 'LOGIN', imei, normalized: null };
