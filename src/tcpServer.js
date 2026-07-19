@@ -1,0 +1,158 @@
+const net = require('net');
+const sessionManager = require('./core/SessionManager');
+const { getAllDecoders } = require('./core/DecoderRegistry');
+const LocationService = require('./services/LocationService');
+const RawPacket = require('./models/RawPacket');
+const { scoped } = require('./utils/logger');
+
+const log = scoped('TcpServer');
+
+// Per-socket receive buffers, since TCP gives us a byte stream, not framed
+// messages - a device's packet can arrive split across multiple 'data'
+// events, or several packets can arrive coalesced into one.
+const socketBuffers = new WeakMap();
+
+async function auditPacket({ imei, protocol, direction, buffer, protocolNumberHex, parsedOk, error }) {
+  try {
+    await RawPacket.create({
+      imei: imei || null,
+      protocol,
+      direction,
+      hex: buffer.toString('hex'),
+      protocolNumberHex: protocolNumberHex || null,
+      parsedOk,
+      error: error || null,
+    });
+  } catch (err) {
+    // Raw packet audit trail is optional / best-effort - never let it break the pipeline
+    log.warn('Failed to persist raw packet audit record', { error: err.message });
+  }
+}
+
+function handleConnection(socket, decoder) {
+  const { PROTOCOL } = decoder;
+  socketBuffers.set(socket, Buffer.alloc(0));
+
+  log.info('Device connected', { protocol: PROTOCOL, remote: `${socket.remoteAddress}:${socket.remotePort}` });
+
+  socket.on('data', async (chunk) => {
+    const combined = Buffer.concat([socketBuffers.get(socket) || Buffer.alloc(0), chunk]);
+    const { frames, rest } = decoder.extractFrames(combined);
+    socketBuffers.set(socket, rest);
+
+    for (const frame of frames) {
+      let parsed;
+      try {
+        parsed = decoder.parseFrame(frame);
+      } catch (err) {
+        log.error('Packet decode error', { protocol: PROTOCOL, error: err.message });
+        await auditPacket({ protocol: PROTOCOL, direction: 'IN', buffer: frame, parsedOk: false, error: err.message });
+        continue; // Section 8: Packet Decode Errors are logged, connection stays open
+      }
+
+      if (!parsed.crcValid) {
+        log.warn('CRC validation failed', { protocol: PROTOCOL });
+        await auditPacket({
+          protocol: PROTOCOL,
+          direction: 'IN',
+          buffer: frame,
+          protocolNumberHex: parsed.protocolNumberHex,
+          parsedOk: false,
+          error: 'CRC mismatch',
+        });
+        continue; // do not ACK a packet that failed integrity check
+      }
+
+      await auditPacket({
+        imei: sessionManager.getImeiBySocket(socket),
+        protocol: PROTOCOL,
+        direction: 'IN',
+        buffer: frame,
+        protocolNumberHex: parsed.protocolNumberHex,
+        parsedOk: true,
+      });
+
+      if (parsed.type === 'LOGIN') {
+        sessionManager.registerSession(socket, PROTOCOL, parsed.imei);
+        log.info('Login success', { protocol: PROTOCOL, imei: parsed.imei });
+      } else if (!sessionManager.isAuthenticated(socket)) {
+        // Received a non-login packet before authentication - ignore per spec,
+        // most GPS devices will re-send login if they get no ACK.
+        log.warn('Unauthenticated packet dropped', { protocol: PROTOCOL, type: parsed.type });
+        continue;
+      } else {
+        sessionManager.touch(sessionManager.getImeiBySocket(socket));
+      }
+
+      const imei = parsed.imei || sessionManager.getImeiBySocket(socket);
+
+      if (parsed.type === 'LOCATION' && parsed.normalized) {
+        try {
+          await LocationService.processLocation(imei, { ...parsed.normalized, imei });
+        } catch (err) {
+          log.error('Failed to process location', { imei, error: err.message });
+        }
+      } else if (parsed.type === 'HEARTBEAT') {
+        await LocationService.processHeartbeat(imei, parsed.normalized || {});
+      }
+
+      if (parsed.ack) {
+        socket.write(parsed.ack);
+        await auditPacket({
+          imei,
+          protocol: PROTOCOL,
+          direction: 'OUT',
+          buffer: parsed.ack,
+          protocolNumberHex: parsed.protocolNumberHex,
+          parsedOk: true,
+        });
+      }
+    }
+  });
+
+  socket.on('close', async () => {
+    const imei = sessionManager.removeBySocket(socket);
+    socketBuffers.delete(socket);
+    log.info('Device disconnected', { protocol: PROTOCOL, imei });
+    if (imei) {
+      await LocationService.markDeviceOffline(imei);
+    }
+  });
+
+  socket.on('error', (err) => {
+    log.error('Socket error', { protocol: PROTOCOL, error: err.message });
+  });
+
+  socket.setTimeout(5 * 60 * 1000); // 5 min idle timeout, most GPS devices heartbeat far more often
+  socket.on('timeout', () => {
+    log.warn('Socket idle timeout - closing', { protocol: PROTOCOL });
+    socket.destroy();
+  });
+}
+
+/**
+ * Starts one TCP listener per registered protocol decoder. Each listener is
+ * completely independent at the socket level but shares the same
+ * SessionManager, LocationService and event bus - this is what "modular
+ * architecture, additional protocols added with minimal changes" (Section
+ * 11) means in practice: adding JC261 later is one new decoder module plus
+ * one new entry in DecoderRegistry, nothing here changes.
+ */
+function startTcpServers() {
+  const servers = [];
+
+  for (const decoder of getAllDecoders()) {
+    const server = net.createServer((socket) => handleConnection(socket, decoder));
+    server.listen(decoder.DEFAULT_PORT, () => {
+      log.info(`${decoder.PROTOCOL} TCP server listening`, { port: decoder.DEFAULT_PORT });
+    });
+    server.on('error', (err) => {
+      log.error(`${decoder.PROTOCOL} TCP server error`, { error: err.message });
+    });
+    servers.push(server);
+  }
+
+  return servers;
+}
+
+module.exports = { startTcpServers };
