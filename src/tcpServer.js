@@ -44,6 +44,7 @@ function handleConnection(socket, decoder) {
       let parsed;
       try {
         parsed = decoder.parseFrame(frame);
+        console.log(parsed, "parse data")
       } catch (err) {
         log.error('Packet decode error', { protocol: PROTOCOL, error: err.message });
         await auditPacket({ protocol: PROTOCOL, direction: 'IN', buffer: frame, parsedOk: false, error: err.message });
@@ -85,8 +86,10 @@ function handleConnection(socket, decoder) {
       }
 
       const imei = parsed.imei || sessionManager.getImeiBySocket(socket);
+      console.log(imei, "imei")
 
       if (parsed.type === 'LOCATION' && parsed.normalized) {
+        console.log("location")
         try {
           await LocationService.processLocation(imei, { ...parsed.normalized, imei });
         } catch (err) {
