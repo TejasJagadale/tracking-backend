@@ -214,7 +214,7 @@ function parseFrame(frame) {
   if (!crcValid) {
     return { ...base, type: 'UNKNOWN', imei: null, normalized: null };
   }
-console.log("parseFrame", protocolNumber, content, base)
+console.log("parseFrame", protocolNumber, "contttetetetetet", content, "baseeeeeeeeeee", base)
   switch (protocolNumber) {
 
     
