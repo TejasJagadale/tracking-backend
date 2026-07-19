@@ -9,7 +9,7 @@ function createApp() {
   app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
   app.use(express.json());
 
-  app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+  app.get('/', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
   app.use('/api/devices', deviceRoutes);
   app.use('/api/locations', locationRoutes);
