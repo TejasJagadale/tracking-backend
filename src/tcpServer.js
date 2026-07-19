@@ -94,6 +94,15 @@ function handleConnection(socket, decoder) {
         }
       } else if (parsed.type === 'HEARTBEAT') {
         await LocationService.processHeartbeat(imei, parsed.normalized || {});
+      } else if (parsed.type === 'OBD_UNVERIFIED') {
+        // Recognized frame (CRC-valid, ack'd), but the field layout isn't
+        // verified yet - see protocols/ob22/decoder.js. Store raw only,
+        // never fabricate location/telemetry fields from it.
+        try {
+          await LocationService.processUnverifiedObd(imei, parsed.normalized, parsed.protocolNumberHex);
+        } catch (err) {
+          log.error('Failed to store unverified OBD packet', { imei, error: err.message });
+        }
       }
 
       if (parsed.ack) {

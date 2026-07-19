@@ -14,9 +14,6 @@ const log = scoped('LocationService');
  * `lastLocation` field on the Device document itself.
  */
 async function processLocation(imei, normalized) {
-  console.log("PROCESS LOCATION CALLED");
-  console.log("IMEI:", imei);
-  console.log(normalized);
   const status = computeStatus({
     speedKmh: normalized.speedKmh,
     ignition: normalized.ignition,
@@ -53,9 +50,6 @@ async function processLocation(imei, normalized) {
     },
     { upsert: true, new: true }
   );
-
-  console.log("Updated Device:");
-console.log(device);
 
   await Location.create({
     imei,
@@ -103,10 +97,42 @@ async function processHeartbeat(imei, heartbeatData = {}) {
   log.debug('Heartbeat processed', { imei, ...heartbeatData });
 }
 
+/**
+ * Called for recognized-but-unverified protocol messages (currently OB22's
+ * OBD_DATA / IGNITION_ALARM types - see protocols/ob22/decoder.js). We know
+ * the device is alive and talking, so we treat it like a heartbeat for
+ * online/lastSeen purposes, but we deliberately do NOT touch lastLocation or
+ * write a Location history row, since the field layout for this payload
+ * hasn't been verified against a real packet yet. The raw hex is stashed on
+ * the device doc (and already in RawPacket via the TCP layer's audit trail)
+ * so it's inspectable once you're ready to decode it properly.
+ */
+async function processUnverifiedObd(imei, normalized, protocolNumberHex) {
+  await Device.findOneAndUpdate(
+    { imei },
+    {
+      $set: {
+        lastSeenAt: new Date(),
+        isOnline: true,
+        lastObdRawUnverified: {
+          protocolNumberHex: protocolNumberHex || null,
+          hex: normalized?.raw || null,
+          receivedAt: new Date(),
+        },
+      },
+    },
+    { upsert: false }
+  );
+
+  eventBus.emit('device:obdRawUnverified', { imei, protocolNumberHex, raw: normalized?.raw });
+
+  log.debug('Unverified OBD packet stored (raw only)', { imei, protocolNumberHex });
+}
+
 async function markDeviceOffline(imei) {
   await Device.findOneAndUpdate({ imei }, { $set: { isOnline: false, lastStatus: 'OFFLINE' } });
   eventBus.emit('device:offline', { imei });
   log.info('Device marked offline', { imei });
 }
 
-module.exports = { processLocation, processHeartbeat, markDeviceOffline };
+module.exports = { processLocation, processHeartbeat, processUnverifiedObd, markDeviceOffline };
