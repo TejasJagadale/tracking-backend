@@ -37,6 +37,7 @@ function handleConnection(socket, decoder) {
 
   socket.on('data', async (chunk) => {
     const combined = Buffer.concat([socketBuffers.get(socket) || Buffer.alloc(0), chunk]);
+    console.log(combined, "combined data")
     const { frames, rest } = decoder.extractFrames(combined);
     socketBuffers.set(socket, rest);
 
