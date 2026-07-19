@@ -14,6 +14,9 @@ const log = scoped('LocationService');
  * `lastLocation` field on the Device document itself.
  */
 async function processLocation(imei, normalized) {
+  console.log("PROCESS LOCATION CALLED");
+  console.log("IMEI:", imei);
+  console.log(normalized);
   const status = computeStatus({
     speedKmh: normalized.speedKmh,
     ignition: normalized.ignition,
@@ -50,6 +53,9 @@ async function processLocation(imei, normalized) {
     },
     { upsert: true, new: true }
   );
+
+  console.log("Updated Device:");
+console.log(device);
 
   await Location.create({
     imei,
