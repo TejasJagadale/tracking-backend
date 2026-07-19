@@ -80,13 +80,17 @@ function bcdToImei(bcdBuffer) {
 }
 
 function buildAck(protocolNumber, serial) {
-  const body = Buffer.alloc(5);
-  body[0] = protocolNumber;
-  body.writeUInt16BE(serial, 1);
-  const crc = crc16X25(Buffer.concat([Buffer.from([0x05]), body]));
-  body.writeUInt16BE(crc, 3);
+  const lengthByte = Buffer.from([0x05]);
+  const protoByte = Buffer.from([protocolNumber]);
+  const serialBuf = Buffer.alloc(2);
+  serialBuf.writeUInt16BE(serial, 0);
 
-  return Buffer.concat([START_STANDARD, Buffer.from([0x05]), body, STOP]);
+  const crcInput = Buffer.concat([lengthByte, protoByte, serialBuf]); // exactly 4 bytes, no CRC placeholder
+  const crc = crc16X25(crcInput);
+  const crcBuf = Buffer.alloc(2);
+  crcBuf.writeUInt16BE(crc, 0);
+
+  return Buffer.concat([START_STANDARD, lengthByte, protoByte, serialBuf, crcBuf, STOP]);
 }
 
 function verifyCrc(frame, isExtended) {
