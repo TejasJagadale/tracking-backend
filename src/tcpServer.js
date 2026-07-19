@@ -42,16 +42,21 @@ function handleConnection(socket, decoder) {
 
     for (const frame of frames) {
       let parsed;
+      console.log(frame, "frame data")
       try {
         parsed = decoder.parseFrame(frame);
         console.log(parsed, "parse data")
       } catch (err) {
+        console.log(err, "parse error")
         log.error('Packet decode error', { protocol: PROTOCOL, error: err.message });
         await auditPacket({ protocol: PROTOCOL, direction: 'IN', buffer: frame, parsedOk: false, error: err.message });
         continue; // Section 8: Packet Decode Errors are logged, connection stays open
       }
 
+      console.log(parsed.protocolNumberHex, "parsed HEX data")
+
       if (!parsed.crcValid) {
+        console.log("crc error")
         log.warn('CRC validation failed', { protocol: PROTOCOL });
         await auditPacket({
           protocol: PROTOCOL,
