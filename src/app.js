@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const deviceRoutes = require('./api/routes/devices');
 const locationRoutes = require('./api/routes/locations');
+const authRoutes = require("./api/routes/auth");
 
 function createApp() {
   const app = express();
@@ -11,6 +12,8 @@ function createApp() {
 
   app.get('/', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
+
+  app.use("/api/auth", authRoutes);
   app.use('/api/devices', deviceRoutes);
   app.use('/api/locations', locationRoutes);
 
