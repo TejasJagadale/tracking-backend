@@ -10,7 +10,8 @@ const licensePackageRoutes = require("./api/routes/licensePackages");
 function createApp() {
   const app = express();
 
-  app.use(cors({ origin: process.env.CORS_ORIGIN || 'https://gps-adminpannel.web.app' }));
+  // app.use(cors({ origin: process.env.CORS_ORIGIN || 'https://gps-adminpannel.web.app' }));
+  app.use(cors('https://gps-adminpannel.web.app'));
   app.use(express.json());
 
   app.get('/', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
