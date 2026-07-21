@@ -3,6 +3,9 @@ const cors = require('cors');
 const deviceRoutes = require('./api/routes/devices');
 const locationRoutes = require('./api/routes/locations');
 const authRoutes = require("./api/routes/auth");
+const dealerRoutes = require("./api/routes/dealers");
+const userRoutes = require("./api/routes/users");
+const licensePackageRoutes = require("./api/routes/licensePackages");
 
 function createApp() {
   const app = express();
@@ -14,6 +17,9 @@ function createApp() {
 
 
   app.use("/api/auth", authRoutes);
+  app.use("/api/dealers", dealerRoutes);
+  app.use("/api/users", userRoutes);
+  app.use("/api/license-packages", licensePackageRoutes);
   app.use('/api/devices', deviceRoutes);
   app.use('/api/locations', locationRoutes);
 
