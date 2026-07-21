@@ -31,7 +31,7 @@ const { createNormalizedGpsData } = require('../../core/DataModel');
  */
 
 const PROTOCOL = 'FMB20'; // matches the enum already on your Device model
-const DEFAULT_PORT = Number(process.env.TELTONIKA_TCP_PORT || 5027);
+const DEFAULT_PORT = Number(process.env.FMB20_TCP_PORT || 5027);
 
 const CODEC_ID = {
     CODEC8: 0x08,
