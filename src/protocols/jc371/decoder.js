@@ -5,6 +5,7 @@ const { parseHeader, buildHeader } = require('./header');
 const body = require('./bodyDecoders');
 
 const PROTOCOL = 'JC371';
+const DEFAULT_PORT = Number(process.env.JC371_TCP_PORT || 5031);
 
 const MSG_ID = {
     GENERAL_TERMINAL_RESPONSE: 0x0001,
@@ -250,6 +251,7 @@ function buildRegistrationResponse(imei, outSeq, replySeq, result = 0, authCode 
 
 module.exports = {
     PROTOCOL,
+    DEFAULT_PORT,
     MSG_ID,
     MSG_ID_NAMES,
     parseFrame,
