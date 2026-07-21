@@ -1,6 +1,8 @@
 const gt06 = require('../protocols/gt06/decoder');
 const jc261 = require('../protocols/jc261/decoder');
 const ob22 = require('../protocols/ob22/decoder');
+const fmb20 = require('../protocols/fmb20/decoder');
+const jc371 = require('../protocols/jc371/decoder')
 // Future protocols plug in here the same way, e.g.:
 // const teltonika = require('../protocols/teltonika/decoder');
 // const jt808 = require('../protocols/jt808/decoder');
@@ -20,7 +22,8 @@ const registry = {
   [gt06.PROTOCOL]: gt06,
   [jc261.PROTOCOL]: jc261,
   [ob22.PROTOCOL]: ob22,
-  // [teltonika.PROTOCOL]: teltonika,
+  [fmb20.PROTOCOL]: fmb20,
+  [jc371.PROTOCOL]: jc371,
   // [jt808.PROTOCOL]: jt808,
 };
 

@@ -101,6 +101,17 @@ function handleConnection(socket, decoder) {
         } catch (err) {
           log.error('Failed to process location', { imei, error: err.message });
         }
+      }else if (parsed.type === 'LOCATION_BATCH' && parsed.records) {
+        // Teltonika Codec8/8E: one TCP frame can carry multiple buffered GPS
+        // fixes. Process oldest-first so lastLocation/status end up reflecting
+        // the most recent point once the loop finishes.
+        for (const record of parsed.records) {
+          try {
+            await LocationService.processLocation(imei, { ...record, imei });
+          } catch (err) {
+            log.error('Failed to process location (batch)', { imei, error: err.message });
+          }
+        }
       } else if (parsed.type === 'HEARTBEAT') {
         await LocationService.processHeartbeat(imei, parsed.normalized || {});
       } else if (parsed.type === 'OBD_UNVERIFIED') {

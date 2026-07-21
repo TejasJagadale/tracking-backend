@@ -20,11 +20,6 @@ const CurrentLocationSchema = new mongoose.Schema(
   { _id: false }
 );
 
-// Raw, not-yet-decoded OBD payloads (fuel/mileage/RPM/DTC/etc from OB22-style
-// devices) land here instead of lastLocation. Deliberately untyped/raw -
-// nothing here is validated as real telemetry yet. Once the real field
-// layout is confirmed against actual OB22 packets, this can be replaced with
-// a proper structured schema and folded into normal location processing.
 const UnverifiedObdSchema = new mongoose.Schema(
   {
     protocolNumberHex: { type: String, default: null },
@@ -40,7 +35,7 @@ const DeviceSchema = new mongoose.Schema(
     protocol: {
       type: String,
       required: true,
-      enum: ['GT06', 'TELTONIKA_CODEC8', 'JT808', 'JC261', 'OB22'],
+      enum: ['GT06', 'FMB20', 'JT808', 'JC261', 'OB22', "JC371"],
     },
     name: { type: String, default: null }, // friendly / vehicle label, set later via admin
     model: { type: String, default: null }, // e.g. "Concox V5", "Teltonika FMB120"
