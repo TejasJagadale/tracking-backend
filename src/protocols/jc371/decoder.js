@@ -252,6 +252,7 @@ function buildRegistrationResponse(imei, outSeq, replySeq, result = 0, authCode 
 module.exports = {
     PROTOCOL,
     DEFAULT_PORT,
+    extractFrames,
     MSG_ID,
     MSG_ID_NAMES,
     parseFrame,
