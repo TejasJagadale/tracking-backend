@@ -1,8 +1,9 @@
 'use strict';
 
-const { FLAG, xorChecksum, extractFrames, escapeFrame } = require('./utils');
+const { FLAG, xorChecksum, extractFrames: rawExtractFrames, escapeFrame } = require('./utils');
 const { parseHeader, buildHeader } = require('./header');
 const body = require('./bodyDecoders');
+const { createNormalizedGpsData } = require('../../core/DataModel');
 
 const PROTOCOL = 'JC371';
 const DEFAULT_PORT = Number(process.env.JC371_TCP_PORT || 5031);
@@ -48,6 +49,49 @@ const MSG_ID = {
 
 const MSG_ID_NAMES = Object.fromEntries(Object.entries(MSG_ID).map(([k, v]) => [v, k]));
 
+// Message IDs that the platform must acknowledge with a General Platform
+// Response (0x8001) per Section 4.1.2's response table. Registration
+// (0x0100) is the one exception - it gets its own dedicated response
+// message (0x8100), not a general one.
+const NEEDS_GENERAL_RESPONSE = new Set([
+    MSG_ID.TERMINAL_HEARTBEAT,
+    MSG_ID.TERMINAL_AUTHENTICATION,
+    MSG_ID.LOCATION_REPORT,
+    MSG_ID.LOCATION_QUERY_RESPONSE,
+    MSG_ID.BATCH_LOCATION_UPLOAD,
+    MSG_ID.PARAMETER_QUERY_RESPONSE,
+    MSG_ID.MULTIMEDIA_EVENT_UPLOAD,
+    MSG_ID.IMMEDIATE_CAPTURE_RESPONSE,
+    MSG_ID.RESOURCE_LIST_UPLOAD,
+    MSG_ID.FILE_UPLOAD_COMPLETE,
+]);
+
+/**
+ * Outbound message sequence numbers, per JT/T808, are scoped to the
+ * terminal session, not global to the server. Ideally this counter lives
+ * in SessionManager alongside the rest of the session's state (and gets
+ * reset/removed on disconnect the same way socketBuffers/sessions are).
+ * Keeping it here as an IMEI-keyed fallback so parseFrame stays a pure,
+ * self-contained module - swap this for SessionManager-backed sequencing
+ * when wiring that in.
+ */
+const outSeqByImei = new Map();
+function nextOutSeq(imei) {
+    const n = ((outSeqByImei.get(imei) || 0) + 1) & 0xffff;
+    outSeqByImei.set(imei, n);
+    return n;
+}
+
+/**
+ * Adapter over utils.extractFrames so the return shape matches the
+ * DecoderRegistry contract ({ frames, rest }) that tcpServer.js expects,
+ * instead of utils.js's own { frames, remainder }.
+ */
+function extractFrames(streamBuffer) {
+    const { frames, remainder } = rawExtractFrames(streamBuffer);
+    return { frames, rest: remainder };
+}
+
 /**
  * Parse ONE unescaped frame (header+body+checksum, no 0x7E flags) into a
  * structured result. Returns { ok:false, error } on checksum failure so
@@ -79,18 +123,23 @@ function parseFrame(rawFrame) {
     // decodeBody() again on the concatenated body bytes; we still return the
     // raw segment body here so the caller can do that.
     const result = {
-        crcValid: true,
+        ok: true,
         protocol: PROTOCOL,
-
         msgId: header.msgId,
         msgIdHex: header.msgIdHex,
-
+        // tcpServer.js reads this common field name across all decoders.
+        protocolNumberHex: header.msgIdHex,
+        msgName: MSG_ID_NAMES[header.msgId] || 'UNKNOWN',
         imei: header.imei,
+        serial: header.msgSeq,
+        crcValid: true, // we already returned early above on checksum mismatch
         msgSeq: header.msgSeq,
         isV2019: header.attrs.isV2019,
         segmented: header.attrs.segmented,
         packetInfo: header.packetInfo,
         rawBody: bodyBuf,
+        normalized: null,
+        ack: null,
     };
 
     if (!header.attrs.segmented) {
@@ -103,6 +152,36 @@ function parseFrame(rawFrame) {
             // as UNHANDLED with the decode error attached instead.
             result.type = 'UNHANDLED';
             result.decodeError = err.message;
+        }
+
+        // Map decoded location data into the common NormalizedGpsData shape
+        // tcpServer.js / LocationService expect, mirroring GT06/JC261/FMB20.
+        if (result.type === 'LOCATION' && result.data) {
+            result.normalized = mapLocationToNormalized(header.imei, result.data);
+        } else if (result.type === 'LOCATION_QUERY_RESPONSE' && result.data) {
+            result.normalized = mapLocationToNormalized(header.imei, result.data);
+        } else if (result.type === 'LOCATION_BATCH' && result.data) {
+            result.records = result.data.records.map((rec) => mapLocationToNormalized(header.imei, rec));
+        } else if (result.type === 'HEARTBEAT') {
+            result.normalized = {};
+        }
+
+        // Build the ACK the device is waiting for. Without this the terminal
+        // times out its own session and disconnects/retries (this is what was
+        // causing the ~10s connect/auth/disconnect loop).
+        if (header.msgId === MSG_ID.TERMINAL_REGISTRATION) {
+            const outSeq = nextOutSeq(header.imei);
+            result.ack = buildRegistrationResponse(header.imei, outSeq, header.msgSeq, 0, 'OK', header.attrs.isV2019);
+        } else if (NEEDS_GENERAL_RESPONSE.has(header.msgId)) {
+            const outSeq = nextOutSeq(header.imei);
+            result.ack = buildGeneralPlatformResponse(
+                header.imei,
+                outSeq,
+                header.msgSeq,
+                header.msgId,
+                0,
+                header.attrs.isV2019
+            );
         }
     } else {
         result.type = 'SEGMENT';
@@ -170,12 +249,42 @@ function decodeBatchLocation(buf) {
 }
 
 /**
+ * Maps one decodeLocationReport() result (native JC371 field names/units)
+ * into the shared NormalizedGpsData shape used by every other protocol.
+ */
+function mapLocationToNormalized(imei, data) {
+    const satelliteItem = (data.supplementary || []).find((s) => s.id === 0x31);
+    const mileageItem = (data.supplementary || []).find((s) => s.id === 0x01);
+    const gsmItem = (data.supplementary || []).find((s) => s.id === 0x30);
+
+    return createNormalizedGpsData({
+        protocol: PROTOCOL,
+        imei,
+        latitude: data.latitude,
+        longitude: data.longitude,
+        speedKmh: data.speed,
+        heading: data.heading,
+        altitude: data.elevation,
+        gpsTimestamp: data.dateTime,
+        satellites: satelliteItem ? satelliteItem.value : null,
+        ignition: data.status && data.status.acc === 'ON',
+        gsmSignal: gsmItem ? gsmItem.value : null,
+        raw: {
+            alarmFlag: data.alarmFlag,
+            status: data.status,
+            mileageKm: mileageItem ? mileageItem.value : null,
+            supplementary: data.supplementary,
+        },
+    });
+}
+
+/**
  * Process a raw TCP chunk. Returns { messages, remainder } - remainder
  * should be prepended to the next chunk (handles frames split across
  * multiple TCP reads).
  */
 function decode(streamBuffer) {
-    const { frames, remainder } = extractFrames(streamBuffer);
+    const { frames, remainder } = rawExtractFrames(streamBuffer);
     const messages = frames.map(parseFrame);
     return { messages, remainder };
 }
@@ -253,9 +362,9 @@ function buildRegistrationResponse(imei, outSeq, replySeq, result = 0, authCode 
 module.exports = {
     PROTOCOL,
     DEFAULT_PORT,
-    extractFrames,
     MSG_ID,
     MSG_ID_NAMES,
+    extractFrames,
     parseFrame,
     decodeBody,
     decode,
