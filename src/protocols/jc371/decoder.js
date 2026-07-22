@@ -79,11 +79,12 @@ function parseFrame(rawFrame) {
     // decodeBody() again on the concatenated body bytes; we still return the
     // raw segment body here so the caller can do that.
     const result = {
-        ok: true,
+        crcValid: true,
         protocol: PROTOCOL,
+
         msgId: header.msgId,
         msgIdHex: header.msgIdHex,
-        msgName: MSG_ID_NAMES[header.msgId] || 'UNKNOWN',
+
         imei: header.imei,
         msgSeq: header.msgSeq,
         isV2019: header.attrs.isV2019,
