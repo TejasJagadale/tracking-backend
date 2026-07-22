@@ -79,13 +79,25 @@ function handleConnection(socket, decoder) {
         parsedOk: true,
       });
 
-      if (parsed.type === 'LOGIN') {
-        sessionManager.registerSession(socket, PROTOCOL, parsed.imei);
-        log.info('Login success', { protocol: PROTOCOL, imei: parsed.imei });
-      } else if (!sessionManager.isAuthenticated(socket)) {
-        // Received a non-login packet before authentication - ignore per spec,
-        // most GPS devices will re-send login if they get no ACK.
-        log.warn('Unauthenticated packet dropped', { protocol: PROTOCOL, type: parsed.type });
+      if (
+        parsed.type === "LOGIN" ||
+        parsed.type === "AUTHENTICATION"
+      ) {
+        sessionManager.registerSession(
+          socket,
+          PROTOCOL,
+          parsed.imei
+        );
+
+        log.info("Authentication success", {
+          protocol: PROTOCOL,
+          imei: parsed.imei
+        });
+
+        if (parsed.ack) {
+          socket.write(parsed.ack);
+        }
+
         continue;
       } else {
         sessionManager.touch(sessionManager.getImeiBySocket(socket));
@@ -101,7 +113,7 @@ function handleConnection(socket, decoder) {
         } catch (err) {
           log.error('Failed to process location', { imei, error: err.message });
         }
-      }else if (parsed.type === 'LOCATION_BATCH' && parsed.records) {
+      } else if (parsed.type === 'LOCATION_BATCH' && parsed.records) {
         // Teltonika Codec8/8E: one TCP frame can carry multiple buffered GPS
         // fixes. Process oldest-first so lastLocation/status end up reflecting
         // the most recent point once the loop finishes.
